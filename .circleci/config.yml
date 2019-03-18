@@ -1,0 +1,49 @@
+version: 2
+
+jobs:
+
+  build:
+    docker:
+      - image: circleci/android:api-28
+    working_directory: ~/rxredux
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx1536m"
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Dkotlin.incremental=false"
+    steps:
+      - checkout
+      - run: ./gradlew :library:build :library:test :sample:assembleDebug :sample:testDebug
+
+  deploy:
+    docker:
+      - image: circleci/android:api-28
+    working_directory: ~/rxredux
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx1536m"
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Dkotlin.incremental=false"
+    steps:
+      - checkout
+      - run: echo "$SIGNING_PGP_BASE64" | base64 --decode > Freeletics.gpg.enc
+      - run: openssl aes-256-cbc -d -in Freeletics.gpg.enc -out Freeletics.gpg -k $ENCRYPTION_KEY
+      - run: gpg --batch --import Freeletics.gpg
+      # Gradle's signing plugin isn't compatible with GPG 2.1 https://github.com/gradle/gradle/issues/888
+      - run: echo $PGP_KEY | gpg --batch --pinentry-mode=loopback --passphrase-fd 0 --export-secret-keys > /home/circleci/.gnupg/secring.gpg
+      - run: echo "signing.password=$PGP_KEY" >> gradle.properties
+      - run: echo "signing.secretKeyRingFile=/home/circleci/.gnupg/secring.gpg" >> gradle.properties
+      - run: ./gradlew :library:uploadArchives --no-daemon --no-parallel
+
+
+
+workflows:
+  version: 2
+
+  build_and_deploy:
+    jobs:
+      - build
+      - deploy:
+          context: android-maven-publish
+          requires:
+            - build
+#          filters:
+#            branches:
+#              only:
+#                - master
